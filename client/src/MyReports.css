@@ -1,0 +1,32 @@
+.my-reports-shell { min-height: 100vh; color: var(--ink); background: #f7f8f4; }
+.my-reports-header { height: 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 max(28px, calc((100% - 1120px) / 2)); border-bottom: 1px solid #e6e9e2; background: #fff; }
+.my-reports-header button { display: inline-flex; align-items: center; gap: 8px; padding: 8px 0; border: 0; color: var(--green); background: transparent; font-size: 11px; font-weight: 600; cursor: pointer; }
+.my-reports-main { width: min(100% - 56px, 1120px); margin: 0 auto; padding: 44px 0 70px; }
+.my-reports-main > .eyebrow { font-size: 9px; }
+.my-reports-main h1 { margin: 12px 0 7px; color: #19362b; font-family: 'Fraunces', Georgia, serif; font-size: 36px; font-weight: 500; }
+.my-reports-intro { color: #808a82; font-size: 11px; }
+.my-reports-grid { display: grid; grid-template-columns: 1.15fr .85fr; align-items: start; gap: 16px; margin-top: 26px; }
+.my-activity-section { min-width: 0; overflow: hidden; border: 1px solid #e6e9e2; border-radius: 3px; background: #fff; }
+.my-activity-heading { min-height: 66px; display: flex; align-items: center; justify-content: space-between; padding: 13px 17px; border-bottom: 1px solid #eef0ea; color: var(--green); }
+.my-activity-heading h2 { margin: 0; color: #314a39; font-size: 12px; font-weight: 600; }
+.my-activity-heading p { margin: 5px 0 0; color: #929b93; font-size: 9px; }
+.my-activity-row { min-height: 73px; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 15px; border-bottom: 1px solid #f0f1ec; }
+.my-activity-row:last-child, .my-claim-row:last-child { border-bottom: 0; }
+.activity-kind { width: max-content; padding: 5px 6px; border-radius: 2px; color: #577199; background: #edf2f8; font-size: 8px; }
+.activity-found { color: #a3633e; background: #f8eee5; }
+.my-activity-row > div { min-width: 0; display: grid; gap: 5px; }
+.my-activity-row > div strong, .my-claim-title strong { overflow: hidden; color: #3a4b3e; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.my-activity-row > div span { display: flex; align-items: center; gap: 4px; overflow: hidden; color: #929b93; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.my-activity-row > small, .my-claim-row > small { grid-column: 2 / -1; display: flex; align-items: center; gap: 5px; color: #98a098; font-size: 8px; }
+.activity-status { width: max-content; padding: 5px 7px; border-radius: 10px; color: #876e37; background: #f7f1df; font-size: 8px; white-space: nowrap; }
+.activity-published, .activity-approved { color: #3e7754; background: #e9f2e8; }
+.activity-claimed, .activity-evidence_requested { color: #567393; background: #eaf0f6; }
+.activity-resolved { color: #34704e; background: #e3f0e7; }
+.activity-rejected, .activity-expired { color: #9d5a50; background: #f8ece9; }
+.my-claim-row { padding: 14px 16px; border-bottom: 1px solid #f0f1ec; }
+.my-claim-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.my-claim-row p { margin: 10px 0; color: #737f76; font-size: 10px; line-height: 1.6; }
+.my-reports-empty { min-height: 110px; display: grid; place-content: center; color: #909a92; text-align: center; font-size: 10px; }
+.my-reports-error { margin-top: 19px; padding: 12px; border: 1px solid #eed9d4; color: #974d42; background: #fff5f2; font-size: 10px; }
+.my-report-cta { display: inline-flex; align-items: center; gap: 8px; margin-top: 19px; padding: 11px 14px; border: 0; border-radius: 3px; color: #fff; background: var(--green); font-size: 10px; font-weight: 600; cursor: pointer; }
+@media (max-width: 760px) { .my-reports-header { height: 64px; padding: 0 18px; } .my-reports-main { width: min(100% - 36px, 540px); padding: 33px 0 50px; } .my-reports-main h1 { font-size: 30px; } .my-reports-grid { grid-template-columns: 1fr; gap: 12px; margin-top: 20px; } .my-activity-row { grid-template-columns: 47px minmax(0, 1fr); gap: 8px; padding: 12px 10px; } .my-activity-row > .activity-status { grid-column: 2; grid-row: 2; } .my-activity-row > small { grid-column: 2; } }
