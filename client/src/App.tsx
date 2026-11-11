@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Check, ChevronDown, Clock3, KeyRound, MapPin, Menu, Search, ShieldCheck, Upload, X } from 'lucide-react'
 import AdminDashboard from './AdminDashboard'
 import MyReports from './MyReports'
+import TrackedItem from './TrackedItem'
 import './App.css'
 
 type Item = { id: number; name: string; category: string; location: string; date: string; image: string; imageAlt: string }
@@ -21,6 +22,11 @@ const initialItems: Item[] = [
 const categories = ['Semua barang', 'Elektronik', 'Aksesori', 'Dokumen', 'Lainnya']
 
 function App() {
+  const trackedRoute = window.location.pathname.match(/^\/items\/(\d+)\/?$/)
+  return trackedRoute ? <TrackedItem reportId={Number(trackedRoute[1])} /> : <Portal />
+}
+
+function Portal() {
   const [items, setItems] = useState(initialItems)
   const [activeCategory, setActiveCategory] = useState('Semua barang')
   const [search, setSearch] = useState('')
@@ -41,14 +47,22 @@ function App() {
         const sessionResponse = await fetch('/api/auth/me', { credentials: 'include' })
         const session = await sessionResponse.json()
         const nextUser = session.user as User | null
-        const slug = nextUser?.organization.slug ?? 'kampus-demo'
+        const requestedOrganization = new URLSearchParams(window.location.search).get('org')
+        const slug = nextUser?.organization.slug ?? requestedOrganization ?? 'kampus-demo'
         const itemsResponse = await fetch('/api/items', { credentials: 'include', headers: { 'x-organization-slug': slug } })
         if (!itemsResponse.ok) return
         const result = await itemsResponse.json()
         if (active) {
           setUser(nextUser)
           setOrganizationSlug(slug)
-          setItems(mapApiItems(result.items))
+          const mappedItems = mapApiItems(result.items)
+          setItems(mappedItems)
+          const claimId = Number(new URLSearchParams(window.location.search).get('claim'))
+          const claimItem = mappedItems.find((item) => item.id === claimId)
+          if (claimItem) {
+            setSelectedItem(claimItem)
+            setDialog('claim')
+          }
         }
       } catch {
         // The sample catalog remains available when the API is not running.

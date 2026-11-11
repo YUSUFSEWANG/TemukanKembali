@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -71,6 +72,27 @@ export function createDatabase(databasePath = process.env.DATABASE_PATH ?? './da
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS item_reports_public_idx ON item_reports(organization_id, type, status, created_at);
+    CREATE TABLE IF NOT EXISTS inventory_items (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      report_id INTEGER NOT NULL UNIQUE REFERENCES item_reports(id) ON DELETE CASCADE,
+      item_code TEXT NOT NULL UNIQUE,
+      current_location TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'stored' CHECK (status IN ('stored', 'claimed', 'returned')),
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS item_movements (
+      id INTEGER PRIMARY KEY,
+      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+      from_location TEXT,
+      to_location TEXT NOT NULL,
+      handled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS item_movements_history_idx ON item_movements(organization_id, item_id, created_at);
     CREATE TABLE IF NOT EXISTS claims (
       id INTEGER PRIMARY KEY,
       organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -121,6 +143,14 @@ export function createDatabase(databasePath = process.env.DATABASE_PATH ?? './da
       const insert = db.prepare(`INSERT INTO item_reports (organization_id, type, category, title, location, event_date, status, image_url)
         VALUES (?, 'found', ?, ?, ?, ?, 'published', ?)`)
       for (const [title, category, location, eventDate, imageUrl] of sampleItems) insert.run(organization.id, category, title, location, eventDate, imageUrl)
+    }
+    const inventoryRows = db.prepare(`SELECT r.id, r.organization_id, r.location FROM item_reports r
+      LEFT JOIN inventory_items i ON i.report_id = r.id WHERE r.type = 'found' AND i.id IS NULL`).all()
+    const addInventory = db.prepare('INSERT INTO inventory_items (organization_id, report_id, item_code, current_location) VALUES (?, ?, ?, ?)')
+    const addMovement = db.prepare('INSERT INTO item_movements (organization_id, item_id, from_location, to_location, notes) VALUES (?, ?, NULL, ?, ?)')
+    for (const report of inventoryRows) {
+      const item = addInventory.run(report.organization_id, report.id, `TB-${randomUUID().slice(0, 8).toUpperCase()}`, report.location)
+      addMovement.run(report.organization_id, item.lastInsertRowid, report.location, 'Barang dicatat di lokasi awal')
     }
   })
   return db

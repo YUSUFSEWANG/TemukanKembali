@@ -37,7 +37,8 @@ Katalog demo menggunakan tenant `kampus-demo` dan data ilustrasi. Buat institusi
 - Laporan barang hilang/temuan dengan foto JPG, PNG, atau WebP hingga 5 MB.
 - Dashboard pengguna untuk status laporan dan klaim.
 - Dashboard pengelola untuk moderasi laporan, pencocokan berbasis aturan, dan verifikasi klaim.
-- Pencatatan serah-terima yang mengubah status barang menjadi selesai.
+- QR unik untuk tiap barang temuan, halaman detail hasil pindai, dan riwayat lokasi publik yang aman.
+- Riwayat perpindahan barang di dashboard pengelola serta pencatatan serah-terima yang mengubah status menjadi selesai.
 - Detail verifikasi disimpan terpisah dan tidak dikirim pada respons katalog publik.
 
 Data SQLite tersimpan di `server/data/`; foto unggahan ada di `server/uploads/`. Keduanya tidak masuk Git.
@@ -61,4 +62,4 @@ npm run build
 npm run lint
 ```
 
-SQLite pada Node 22 masih menampilkan peringatan bahwa API-nya eksperimental. Untuk deployment produksi, pindahkan database ke PostgreSQL, tambahkan pembatasan laju autentikasi dan undangan anggota, serta gunakan object storage untuk foto. QR tracking dan pengelolaan lokasi/staf belum termasuk MVP ini.
+SQLite pada Node 22 masih menampilkan peringatan bahwa API-nya eksperimental. Untuk deployment produksi, pindahkan database ke PostgreSQL, tambahkan pembatasan laju autentikasi dan undangan anggota, serta gunakan object storage untuk foto. Pengelolaan lokasi terstruktur dan staf belum termasuk MVP ini.

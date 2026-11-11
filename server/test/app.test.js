@@ -98,6 +98,32 @@ test('report photos are stored and served as image files', async () => {
   }
 })
 
+test('found reports receive a public-safe tracking code and tenant-scoped movement history', async () => {
+  const admin = await register('Kampus Tracking', 'admin@tracking.ac.id')
+  const otherAdmin = await register('Kampus Tracking Lain', 'admin@tracking-lain.ac.id')
+  const report = await request(app).post('/api/reports').set('Cookie', admin.headers['set-cookie']).send({
+    type: 'found', category: 'Aksesori', title: 'Tas hijau', location: 'Gedung A', privateDetails: 'Ada kunci kecil di kantong rahasia',
+  })
+  const inventory = db.prepare('SELECT * FROM inventory_items WHERE report_id = ?').get(report.body.report.id)
+  assert.match(inventory.item_code, /^TB-[A-F0-9]{8}$/)
+  assert.equal(inventory.current_location, 'Gedung A')
+  await request(app).patch(`/api/admin/reports/${report.body.report.id}/status`).set('Cookie', admin.headers['set-cookie']).send({ status: 'published' }).expect(200)
+  const publicItem = await request(app).get(`/api/items/${report.body.report.id}`).set('x-organization-slug', admin.body.user.organization.slug)
+  assert.equal(publicItem.status, 200)
+  assert.equal(publicItem.body.item.itemCode, inventory.item_code)
+  assert.equal(JSON.stringify(publicItem.body).includes('Ada kunci kecil'), false)
+  assert.equal(JSON.stringify(publicItem.body).includes('notes'), false)
+  const moved = await request(app).post(`/api/admin/reports/${report.body.report.id}/movements`).set('Cookie', admin.headers['set-cookie']).send({ location: 'Pos keamanan', notes: 'Dipindahkan ke lemari terkunci' })
+  assert.equal(moved.status, 201)
+  const publicAfterMove = await request(app).get(`/api/items/${report.body.report.id}`).set('x-organization-slug', admin.body.user.organization.slug)
+  assert.equal(publicAfterMove.body.item.location, 'Pos keamanan')
+  assert.equal(publicAfterMove.body.item.movements.at(-1).location, 'Pos keamanan')
+  const adminHistory = await request(app).get(`/api/admin/reports/${report.body.report.id}/movements`).set('Cookie', admin.headers['set-cookie'])
+  assert.equal(adminHistory.body.movements[0].notes, 'Dipindahkan ke lemari terkunci')
+  const crossTenantMove = await request(app).post(`/api/admin/reports/${report.body.report.id}/movements`).set('Cookie', otherAdmin.headers['set-cookie']).send({ location: 'Lokasi luar' })
+  assert.equal(crossTenantMove.status, 404)
+})
+
 test('regular users can sign in but cannot access organization administration', async () => {
   const admin = await register('Kampus Peran', 'admin@peran.ac.id')
   const organizationId = admin.body.user.organization.id
@@ -125,6 +151,7 @@ test('claim verification and handover advance the item through its lifecycle', a
   const handover = await request(app).post('/api/admin/handovers').set('Cookie', admin.headers['set-cookie']).send({ claimId: claim.body.claim.id, receivedBy: 'Pemilik terverifikasi' })
   assert.equal(handover.status, 201)
   assert.equal(db.prepare('SELECT status FROM item_reports WHERE id = ?').get(report.body.report.id).status, 'resolved')
+  assert.equal(db.prepare('SELECT status FROM inventory_items WHERE report_id = ?').get(report.body.report.id).status, 'returned')
 })
 
 test('admin matching ranks similar lost and found reports and confirms the pair', async () => {

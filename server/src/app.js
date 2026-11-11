@@ -203,6 +203,23 @@ export function createApp(db) {
     response.json({ items: rows.map(publicReport) })
   })
 
+  app.get('/api/items/:id', (request, response) => {
+    const orgId = organizationId(request)
+    if (!orgId) return response.status(404).json({ error: 'Barang tidak ditemukan.' })
+    const item = db.prepare(`SELECT r.id, r.title, r.category, r.public_description AS description, r.event_date AS eventDate,
+        r.status AS reportStatus, r.image_url AS imageUrl, i.item_code AS itemCode, i.current_location AS location,
+        i.status AS inventoryStatus, i.created_at AS createdAt
+      FROM item_reports r JOIN inventory_items i ON i.report_id = r.id AND i.organization_id = r.organization_id
+      WHERE r.id = ? AND r.organization_id = ? AND r.type = 'found'
+        AND r.status IN ('published', 'matched', 'claimed', 'resolved')`).get(request.params.id, orgId)
+    if (!item) return response.status(404).json({ error: 'Barang tidak ditemukan atau belum dipublikasikan.' })
+    const movements = db.prepare(`SELECT to_location AS location, created_at AS createdAt FROM item_movements
+      WHERE organization_id = ? AND item_id = (SELECT id FROM inventory_items WHERE report_id = ? AND organization_id = ?)
+      ORDER BY created_at ASC, id ASC`).all(orgId, item.id, orgId)
+    const status = item.inventoryStatus === 'returned' ? 'returned' : item.inventoryStatus === 'claimed' ? 'claimed' : 'stored'
+    response.json({ item: { ...item, status, movements } })
+  })
+
   app.post('/api/reports', requireAuth, imageUpload.single('photo'), (request, response) => {
     const parsed = z.object({ type: z.enum(['lost', 'found']), category: z.string().trim().min(2).max(60), title: z.string().trim().min(2).max(120), description: z.string().trim().max(500).optional().default(''), privateDetails: z.string().trim().max(1000).optional().default(''), eventDate: z.string().max(40).optional().default(''), location: z.string().trim().min(2).max(160), imageUrl: z.string().url().max(1000).optional().default('') }).safeParse(request.body)
     if (!parsed.success) {
@@ -211,10 +228,21 @@ export function createApp(db) {
     }
     const report = parsed.data
     const status = report.type === 'found' ? 'pending' : 'published'
-    const result = db.prepare(`INSERT INTO item_reports (organization_id, user_id, type, category, title, public_description, private_details, event_date, location, status, image_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(request.auth.view.organization.id, request.auth.view.id, report.type, report.category, report.title, report.description, report.privateDetails, report.eventDate, report.location, status, request.file ? `/uploads/${request.file.filename}` : report.imageUrl)
-    logAction(request, 'report.created', 'item_report', Number(result.lastInsertRowid))
-    response.status(201).json({ report: db.prepare('SELECT * FROM item_reports WHERE id = ? AND organization_id = ?').get(result.lastInsertRowid, request.auth.view.organization.id) })
+    const orgId = request.auth.view.organization.id
+    const reportId = runInTransaction(db, () => {
+      const result = db.prepare(`INSERT INTO item_reports (organization_id, user_id, type, category, title, public_description, private_details, event_date, location, status, image_url)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(orgId, request.auth.view.id, report.type, report.category, report.title, report.description, report.privateDetails, report.eventDate, report.location, status, request.file ? `/uploads/${request.file.filename}` : report.imageUrl)
+      const id = Number(result.lastInsertRowid)
+      if (report.type === 'found') {
+        const item = db.prepare('INSERT INTO inventory_items (organization_id, report_id, item_code, current_location) VALUES (?, ?, ?, ?)')
+          .run(orgId, id, `TB-${randomUUID().slice(0, 8).toUpperCase()}`, report.location)
+        db.prepare('INSERT INTO item_movements (organization_id, item_id, to_location, handled_by, notes) VALUES (?, ?, ?, ?, ?)')
+          .run(orgId, item.lastInsertRowid, report.location, request.auth.view.id, 'Barang diterima dan dicatat')
+      }
+      logAction(request, 'report.created', 'item_report', id)
+      return id
+    })
+    response.status(201).json({ report: db.prepare('SELECT * FROM item_reports WHERE id = ? AND organization_id = ?').get(reportId, orgId) })
   })
 
   app.get('/api/reports/mine', requireAuth, (request, response) => {
@@ -251,7 +279,9 @@ export function createApp(db) {
   app.get('/api/admin/reports', requireStaff, (request, response) => {
     const orgId = request.auth.view.organization.id
     const status = String(request.query.status ?? '')
-    const reports = db.prepare(`SELECT r.*, u.name AS reporter_name FROM item_reports r LEFT JOIN users u ON u.id = r.user_id
+    const reports = db.prepare(`SELECT r.*, u.name AS reporter_name, i.id AS inventory_item_id, i.item_code, i.current_location
+      FROM item_reports r LEFT JOIN users u ON u.id = r.user_id
+      LEFT JOIN inventory_items i ON i.report_id = r.id AND i.organization_id = r.organization_id
       WHERE r.organization_id = ? AND (? = '' OR r.status = ?) ORDER BY r.created_at DESC, r.id DESC`).all(orgId, status, status)
     response.json({ reports })
   })
@@ -268,6 +298,36 @@ export function createApp(db) {
     if (!result.changes) return response.status(409).json({ error: 'Status laporan tidak berubah.' })
     logAction(request, `report.${parsed.data.status}`, 'item_report', Number(request.params.id))
     response.json({ status: parsed.data.status })
+  })
+
+  app.get('/api/admin/reports/:id/movements', requireStaff, (request, response) => {
+    const orgId = request.auth.view.organization.id
+    const item = db.prepare('SELECT id FROM inventory_items WHERE report_id = ? AND organization_id = ?').get(request.params.id, orgId)
+    if (!item) return response.status(404).json({ error: 'Riwayat barang tidak ditemukan.' })
+    const movements = db.prepare(`SELECT m.id, m.from_location AS fromLocation, m.to_location AS toLocation, m.notes, m.created_at AS createdAt, u.name AS handledBy
+      FROM item_movements m LEFT JOIN users u ON u.id = m.handled_by
+      WHERE m.organization_id = ? AND m.item_id = ? ORDER BY m.created_at DESC, m.id DESC`).all(orgId, item.id)
+    response.json({ movements })
+  })
+
+  app.post('/api/admin/reports/:id/movements', requireStaff, (request, response) => {
+    const parsed = z.object({ location: z.string().trim().min(2).max(160), notes: z.string().trim().max(500).optional().default('') }).safeParse(request.body)
+    if (!parsed.success) return response.status(400).json({ error: 'Lokasi baru wajib diisi.' })
+    const orgId = request.auth.view.organization.id
+    const item = db.prepare(`SELECT i.id, i.current_location, i.status, r.status AS report_status FROM inventory_items i
+      JOIN item_reports r ON r.id = i.report_id AND r.organization_id = i.organization_id
+      WHERE i.report_id = ? AND i.organization_id = ? AND r.type = 'found'`).get(request.params.id, orgId)
+    if (!item) return response.status(404).json({ error: 'Barang tidak ditemukan di organisasi ini.' })
+    if (item.status === 'returned' || ['rejected', 'expired', 'resolved'].includes(item.report_status)) return response.status(409).json({ error: 'Barang ini tidak lagi berada dalam penyimpanan.' })
+    const movementId = runInTransaction(db, () => {
+      const movement = db.prepare('INSERT INTO item_movements (organization_id, item_id, from_location, to_location, handled_by, notes) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(orgId, item.id, item.current_location, parsed.data.location, request.auth.view.id, parsed.data.notes)
+      db.prepare('UPDATE inventory_items SET current_location = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?')
+        .run(parsed.data.location, item.id, orgId)
+      logAction(request, 'item.moved', 'inventory_item', item.id)
+      return Number(movement.lastInsertRowid)
+    })
+    response.status(201).json({ movementId, location: parsed.data.location })
   })
 
   app.get('/api/admin/matches', requireStaff, (request, response) => {
@@ -333,6 +393,10 @@ export function createApp(db) {
       db.prepare('UPDATE claims SET status = ?, verified_by = ? WHERE id = ? AND organization_id = ?').run(parsed.data.status, request.auth.view.id, claim.id, orgId)
       if (parsed.data.status === 'approved') db.prepare("UPDATE item_reports SET status = 'claimed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(claim.report_id, orgId)
       if (parsed.data.status === 'rejected' || parsed.data.status === 'evidence_requested') db.prepare("UPDATE item_reports SET status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND status = 'claimed'").run(claim.report_id, orgId)
+      if (parsed.data.status === 'approved' || parsed.data.status === 'rejected' || parsed.data.status === 'evidence_requested') {
+        db.prepare('UPDATE inventory_items SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE report_id = ? AND organization_id = ?')
+          .run(parsed.data.status === 'approved' ? 'claimed' : 'stored', claim.report_id, orgId)
+      }
       logAction(request, `claim.${parsed.data.status}`, 'claim', claim.id)
     })
     response.json({ status: parsed.data.status })
@@ -347,6 +411,12 @@ export function createApp(db) {
     const record = runInTransaction(db, () => {
       const result = db.prepare('INSERT INTO handover_records (organization_id, report_id, claim_id, staff_id, received_by, notes) VALUES (?, ?, ?, ?, ?, ?)').run(orgId, claim.report_id, claim.id, request.auth.view.id, parsed.data.receivedBy, parsed.data.notes)
       db.prepare("UPDATE item_reports SET status = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(claim.report_id, orgId)
+      const item = db.prepare('SELECT id, current_location FROM inventory_items WHERE report_id = ? AND organization_id = ?').get(claim.report_id, orgId)
+      if (item) {
+        db.prepare("UPDATE inventory_items SET status = 'returned', current_location = 'Pemilik', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(item.id, orgId)
+        db.prepare('INSERT INTO item_movements (organization_id, item_id, from_location, to_location, handled_by, notes) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(orgId, item.id, item.current_location, 'Pemilik', request.auth.view.id, 'Barang diserahkan kembali kepada pemilik')
+      }
       logAction(request, 'item.handed_over', 'handover', Number(result.lastInsertRowid))
       return Number(result.lastInsertRowid)
     })
